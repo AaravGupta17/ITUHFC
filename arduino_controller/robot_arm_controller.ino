@@ -4,10 +4,25 @@
   This program listens for commands over the serial port to control a 3-axis
   robotic arm with a gripper.
 
-  Hardware Assumptions:
-  - 3 Stepper motors (Base, Shoulder, Elbow) controlled by drivers like A4988 or DRV8825.
-  - 1 Servo motor for the gripper.
-  - Arduino Uno or similar microcontroller.
+  ====================================================================
+  HOW TO MEET THE 2-MINUTE TIME LIMIT
+  ====================================================================
+  The speed of the robot is determined by how fast the physical motors can move.
+  The Python "brain" script is very fast, but the Arduino needs to be told how
+  fast it is allowed to run the motors.
+
+  This is done using the AccelStepper library. You MUST use this library for
+  high-speed movements.
+
+  The key parameters to tune are:
+  - setMaxSpeed(): The maximum speed the motor can run without stalling.
+  - setAcceleration(): How quickly the motor can ramp up to that max speed.
+
+  You will need to EXPERIMENT with these values for your specific motors and arm
+  weight. Start with low values, and gradually increase them until the motors
+  start to skip steps, then reduce the values slightly. Higher values mean a
+  faster mission time. I have added example values in the setup() function below.
+  ====================================================================
 
   Recommended Libraries:
   - AccelStepper: For smooth, non-blocking control of the stepper motors.
@@ -15,42 +30,29 @@
   - Servo: Comes standard with the Arduino IDE.
 
   Serial Communication Protocol:
-  Commands are sent as a string followed by a newline character ('\n').
-  Format: <Identifier>,<Value>\n
-
-  Identifiers:
-  - 'B': Base motor
-  - 'S': Shoulder motor
-  - 'E': Elbow motor
-  - 'G': Gripper servo
-
-  Example Commands:
-  - "B,90.5\n"  -> Move Base motor to 90.5 degrees.
-  - "S,45.0\n"  -> Move Shoulder motor to 45.0 degrees.
-  - "G,1\n"     -> Close the gripper (1 for close, 0 for open).
+  Format: <Identifier>,<Value>\n (e.g., "B,90.5\n", "G,1\n")
 */
 
 #include <Servo.h>
-// #include <AccelStepper.h> // Uncomment when you have the library installed
+#include <AccelStepper.h>
 
 // --- Define Hardware Pins (Update with your actual wiring) ---
-// Stepper Motor Pins
 const int BASE_STEP_PIN = 2;
 const int BASE_DIR_PIN = 5;
 const int SHOULDER_STEP_PIN = 3;
 const int SHOULDER_DIR_PIN = 6;
 const int ELBOW_STEP_PIN = 4;
 const int ELBOW_DIR_PIN = 7;
-
-// Gripper Servo Pin
 const int GRIPPER_SERVO_PIN = 9;
+
+// Define motor interface type. 1 = A4988/DRV8825 driver
+#define motorInterfaceType 1
 
 // --- Motor & Servo Objects ---
 Servo gripperServo;
-// AccelStepper baseStepper(AccelStepper::DRIVER, BASE_STEP_PIN, BASE_DIR_PIN);
-// AccelStepper shoulderStepper(AccelStepper::DRIVER, SHOULDER_STEP_PIN, SHOULDER_DIR_PIN);
-// AccelStepper elbowStepper(AccelStepper::DRIVER, ELBOW_STEP_PIN, ELBOW_DIR_PIN);
-
+AccelStepper baseStepper(motorInterfaceType, BASE_STEP_PIN, BASE_DIR_PIN);
+AccelStepper shoulderStepper(motorInterfaceType, SHOULDER_STEP_PIN, SHOULDER_DIR_PIN);
+AccelStepper elbowStepper(motorInterfaceType, ELBOW_STEP_PIN, ELBOW_DIR_PIN);
 
 // --- Serial Communication Buffer ---
 char serialBuffer[64];
@@ -60,36 +62,41 @@ void setup() {
   Serial.begin(9600);
   Serial.println("Robot Arm Controller Initialized.");
 
-  // Attach the servo
   gripperServo.attach(GRIPPER_SERVO_PIN);
 
-  // TODO: Configure AccelStepper objects here
-  // e.g., baseStepper.setMaxSpeed(1000);
-  //       baseStepper.setAcceleration(500);
+  // === SPEED CONFIGURATION ===
+  // These values are examples. You MUST tune them for your robot.
+  baseStepper.setMaxSpeed(1000);
+  baseStepper.setAcceleration(500);
+
+  shoulderStepper.setMaxSpeed(1000);
+  shoulderStepper.setAcceleration(500);
+
+  elbowStepper.setMaxSpeed(1000);
+  elbowStepper.setAcceleration(500);
 }
 
 void loop() {
-  // Check for incoming serial data
+  // Check for incoming serial data to process new commands
   if (Serial.available() > 0) {
     char incomingChar = Serial.read();
-
     if (incomingChar == '\n') {
-      // End of command, process it
-      serialBuffer[bufferPos] = '\0'; // Null-terminate the string
+      serialBuffer[bufferPos] = '\0';
       parseCommand(serialBuffer);
-      bufferPos = 0; // Reset buffer
+      bufferPos = 0;
     } else {
-      // Add character to buffer
       if (bufferPos < sizeof(serialBuffer) - 1) {
         serialBuffer[bufferPos++] = incomingChar;
       }
     }
   }
 
-  // TODO: Run the steppers continuously
-  // baseStepper.run();
-  // shoulderStepper.run();
-  // elbowStepper.run();
+  // This is the most important part for speed:
+  // The .run() functions must be called as often as possible in the loop.
+  // They will move the motors towards their target angles smoothly.
+  baseStepper.run();
+  shoulderStepper.run();
+  elbowStepper.run();
 }
 
 void parseCommand(char* command) {
@@ -97,58 +104,39 @@ void parseCommand(char* command) {
   Serial.println(command);
 
   char identifier = command[0];
-  float value = atof(command + 2); // Convert the part after the comma to a float
+  float value = atof(command + 2);
 
   switch (identifier) {
-    case 'B':
-      moveBase(value);
-      break;
-    case 'S':
-      moveShoulder(value);
-      break;
-    case 'E':
-      moveElbow(value);
-      break;
-    case 'G':
-      setGripper(value == 1); // 1 for close, 0 for open
-      break;
-    default:
-      Serial.println("Error: Unknown command identifier.");
-      break;
+    case 'B': moveBase(value); break;
+    case 'S': moveShoulder(value); break;
+    case 'E': moveElbow(value); break;
+    case 'G': setGripper(value == 1); break;
+    default: Serial.println("Error: Unknown command identifier."); break;
   }
 }
 
-// --- Placeholder Functions ---
+// --- Motor Control Functions ---
 
 void moveBase(float angle) {
-  Serial.print("Placeholder: Move Base to ");
-  Serial.print(angle);
-  Serial.println(" degrees.");
-  // TODO: Implement actual motor control using AccelStepper
-  // long steps = angle * (STEPS_PER_REVOLUTION / 360.0);
-  // baseStepper.moveTo(steps);
+  // Assuming 200 steps per revolution and 1x microstepping
+  long steps = angle * (200.0 / 360.0);
+  baseStepper.moveTo(steps);
 }
 
 void moveShoulder(float angle) {
-  Serial.print("Placeholder: Move Shoulder to ");
-  Serial.print(angle);
-  Serial.println(" degrees.");
-  // TODO: Implement actual motor control
+  long steps = angle * (200.0 / 360.0);
+  shoulderStepper.moveTo(steps);
 }
 
 void moveElbow(float angle) {
-  Serial.print("Placeholder: Move Elbow to ");
-  Serial.print(angle);
-  Serial.println(" degrees.");
-  // TODO: Implement actual motor control
+  long steps = angle * (200.0 / 360.0);
+  elbowStepper.moveTo(steps);
 }
 
 void setGripper(bool close) {
   if (close) {
-    Serial.println("Placeholder: Closing gripper.");
-    // gripperServo.write(0); // Angle for closed position
+    gripperServo.write(0); // Angle for closed position
   } else {
-    Serial.println("Placeholder: Opening gripper.");
-    // gripperServo.write(90); // Angle for open position
+    gripperServo.write(90); // Angle for open position
   }
 }
