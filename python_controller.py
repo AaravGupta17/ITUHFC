@@ -27,8 +27,10 @@ import time
 
 from src.logic.robot import Robot
 from src.hardware.serial_hardware import SerialStepper, SerialGripper
-from src.navigation.mock_nav import MockBase
-from src.hardware.mock_hardware import MockColorSensor, RIPE_COLOR, UNRIPE_COLOR, ROTTEN_COLOR
+from src.hardware.mock_hardware import (
+    MockStepper, MockGripper, MockColorSensor,
+    RIPE_COLOR, UNRIPE_COLOR, ROTTEN_COLOR
+)
 
 # --- Configuration ---
 SERIAL_PORT = '/dev/ttyACM0'
@@ -56,16 +58,14 @@ def main():
 
     # Initialize all robot components
     # Using mocks for everything to run a full simulation without hardware.
-    mobile_base = MockBase()
-    base_stepper = MockStepper(200) # Using Mock Stepper for simulation
+    base_stepper = MockStepper(200)
     shoulder_stepper = MockStepper(200)
     elbow_stepper = MockStepper(200)
-    gripper = MockGripper() # Using Mock Gripper for simulation
+    gripper = MockGripper()
     color_sensor = MockColorSensor()
 
     # Create a robot instance
     robot = Robot(
-        mobile_base=mobile_base,
         base_stepper=base_stepper,
         shoulder_stepper=shoulder_stepper,
         elbow_stepper=elbow_stepper,
