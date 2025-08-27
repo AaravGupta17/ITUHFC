@@ -1,27 +1,47 @@
 import math
-from typing import Tuple
+from typing import Tuple, List, Dict
 
 from src.hardware.stepper import Stepper
 from src.hardware.gripper import Gripper
 from src.hardware.color_sensor import ColorSensor
-from src.kinematics.inverse_kinematics import calculate_angles
+from src.kinematics.inverse_kinematics import calculate_angles_3d
 
-# Define constants for colors
+# --- Define constants for colors ---
 RIPE_COLOR = (255, 0, 0)
 UNRIPE_COLOR = (0, 255, 0)
 ROTTEN_COLOR = (0, 0, 0)
 
-# Define constants for locations (placeholders)
-CRATE_GRIP_POINT = (0.2, 0.1)
-BUTTON_1_LOCATION = (0.3, 0.2)
-BUTTON_2_LOCATION = (0.3, 0.3)
-REFILL_LOCATION = (0.1, 0.1)
-LEVER_1_LOCATION = (0.4, 0.2)
-LEVER_2_LOCATION = (0.4, 0.3)
-FRUIT_LOCATIONS = [(0.5, 0.1), (0.5, 0.2), (0.5, 0.3)]
-WASTE_PIT_LOCATION = (0.1, 0.4)
-FRUIT_PIT_LOCATION = (0.2, 0.4)
-NEUTRAL_POSITION = (0.2, 0.3) # A safe position to move to
+# --- Define constants for field locations (all in meters) ---
+# Heights
+GROUND_HEIGHT = 0.0
+TRAVEL_HEIGHT = 0.4  # A safe height for moving across the field
+ELEVATED_PLATFORM_HEIGHT = 0.2
+
+# General Locations
+NEUTRAL_POSITION = (0.2, 0.0, TRAVEL_HEIGHT) # A safe home/neutral position
+CONTAINER_PICKUP_LOCATIONS = {
+    "orange": (0.1, -0.3, GROUND_HEIGHT + 0.05),
+    "gray": (0.1, 0.0, GROUND_HEIGHT + 0.05),
+    "green": (0.1, 0.3, GROUND_HEIGHT + 0.05),
+}
+
+# Sowing Plot Locations
+PLOT_LOCATIONS = {
+    "orange": (0.5, -0.5, GROUND_HEIGHT),
+    "gray": (0.5, 0.0, GROUND_HEIGHT),
+    "green": (0.5, 0.5, GROUND_HEIGHT),
+}
+
+# Harvesting Locations
+FRUITS_ROW_1 = [(0.6, 0.4, GROUND_HEIGHT), (0.7, 0.4, GROUND_HEIGHT)]
+FRUITS_ROW_2_ELEVATED = [(0.6, 0.2, ELEVATED_PLATFORM_HEIGHT), (0.7, 0.2, ELEVATED_PLATFORM_HEIGHT)]
+FRUITS_ROW_3 = [(0.6, 0.0, GROUND_HEIGHT), (0.7, 0.0, GROUND_HEIGHT)]
+ALL_FRUIT_LOCATIONS = FRUITS_ROW_1 + FRUITS_ROW_2_ELEVATED + FRUITS_ROW_3
+
+# Sorting Pit Locations
+WASTE_PIT_LOCATION = (0.2, -0.4, GROUND_HEIGHT + 0.1)
+FRUIT_PIT_LOCATION = (0.2, 0.4, GROUND_HEIGHT + 0.1)
+
 
 class Robot:
     def __init__(
@@ -33,6 +53,7 @@ class Robot:
         color_sensor: ColorSensor,
         upper_arm_length: float,
         forearm_length: float,
+        active_plots: List[str],
     ):
         self.base_stepper = base_stepper
         self.shoulder_stepper = shoulder_stepper
@@ -41,85 +62,89 @@ class Robot:
         self.color_sensor = color_sensor
         self.l1 = upper_arm_length
         self.l2 = forearm_length
+        self.active_plots = active_plots
 
     def initialize(self):
-        """Initializes the robot by homing all motors."""
+        """Initializes the robot by homing all motors and moving to neutral."""
+        print("Initializing and homing all motors...")
         self.base_stepper.home()
         self.shoulder_stepper.home()
         self.elbow_stepper.home()
         self.gripper.open()
+        print("Moving to neutral position.")
+        self.move_to_xyz(*NEUTRAL_POSITION)
 
-    def move_to_xy(self, x: float, y: float):
-        """Moves the arm to a specific (x, y) coordinate."""
+    def move_to_xyz(self, x: float, y: float, z: float):
+        """Moves the arm to a specific (x, y, z) coordinate."""
+        print(f"Moving to ({x:.2f}, {y:.2f}, {z:.2f})")
         try:
-            shoulder_angle_rad, elbow_angle_rad = calculate_angles(x, y, self.l1, self.l2)
-
-            # Convert radians to degrees for the stepper motors
-            shoulder_angle_deg = math.degrees(shoulder_angle_rad)
-            elbow_angle_deg = math.degrees(elbow_angle_rad)
-
-            self.shoulder_stepper.move_to_angle(shoulder_angle_deg)
-            self.elbow_stepper.move_to_angle(elbow_angle_deg)
+            base, shoulder, elbow = calculate_angles_3d(x, y, z, self.l1, self.l2)
+            self.base_stepper.move_to_angle(math.degrees(base))
+            self.shoulder_stepper.move_to_angle(math.degrees(shoulder))
+            self.elbow_stepper.move_to_angle(math.degrees(elbow))
         except ValueError as e:
-            print(f"Error moving to ({x}, {y}): {e}")
+            print(f"Error moving to ({x}, {y}, {z}): {e}")
 
     def sow(self):
-        """Executes the sowing game plan."""
-        print("--- Starting Sowing ---")
+        """Executes the sowing game plan using the container drop strategy."""
+        print("\n--- Starting Sowing Mission ---")
+        for plot_color in self.active_plots:
+            print(f"\nSowing plot: {plot_color.upper()}")
 
-        # This is a simplified version of the logic described.
-        # A full implementation would require more state management (e.g. for button presses)
-        # and timing (delays).
+            container_loc = CONTAINER_PICKUP_LOCATIONS[plot_color]
+            plot_loc = PLOT_LOCATIONS[plot_color]
 
-        print("Moving crate for the first time...")
-        self.move_to_xy(*CRATE_GRIP_POINT)
-        self.gripper.close()
-        self.move_to_xy(*BUTTON_1_LOCATION) # Simplified: move to a location related to button 1
+            # 1. Go to container pickup location
+            self.move_to_xyz(container_loc[0], container_loc[1], TRAVEL_HEIGHT)
+            self.move_to_xyz(*container_loc)
 
-        print("Recalling crate to refill...")
-        self.move_to_xy(*REFILL_LOCATION)
+            # 2. Grab container
+            print("Grabbing container...")
+            self.gripper.close()
 
-        print("Moving crate for the second time...")
-        self.move_to_xy(*BUTTON_2_LOCATION) # Simplified: move to a location related to button 2
+            # 3. Lift container and move to plot
+            self.move_to_xyz(container_loc[0], container_loc[1], TRAVEL_HEIGHT)
+            self.move_to_xyz(plot_loc[0], plot_loc[1], TRAVEL_HEIGHT)
+            self.move_to_xyz(*plot_loc)
 
-        print("Recalling crate and finishing...")
-        self.move_to_xy(*REFILL_LOCATION)
-        self.gripper.open()
+            # 4. Release seeds (open flap/gripper)
+            print("Releasing seeds...")
+            self.gripper.open()
 
-        print("Working water levers...")
-        self.move_to_xy(*LEVER_1_LOCATION)
-        self.gripper.close()
-        # Simulate moving down and up by just waiting
-        self.move_to_xy(*LEVER_2_LOCATION)
-        self.gripper.open()
+            # 5. Return to neutral
+            self.move_to_xyz(plot_loc[0], plot_loc[1], TRAVEL_HEIGHT)
+            self.move_to_xyz(*NEUTRAL_POSITION)
 
-        print("--- Sowing Complete ---")
-
+        print("\n--- Sowing Mission Complete ---")
 
     def harvest(self):
         """Executes the harvesting game plan."""
-        print("--- Starting Harvesting ---")
-        for fruit_location in FRUIT_LOCATIONS:
-            self.move_to_xy(*NEUTRAL_POSITION)
-            self.move_to_xy(*fruit_location)
+        print("\n--- Starting Harvesting Mission ---")
+        for fruit_location in ALL_FRUIT_LOCATIONS:
+            print(f"\nApproaching fruit at ({fruit_location[0]:.2f}, {fruit_location[1]:.2f}, {fruit_location[2]:.2f})")
+            self.move_to_xyz(*NEUTRAL_POSITION) # Go to neutral first
+            self.move_to_xyz(fruit_location[0], fruit_location[1], fruit_location[2] + 0.1) # Approach from above
+            self.move_to_xyz(*fruit_location)
 
+            print("Sensing fruit color...")
             color = self.color_sensor.read_color()
 
             if color == UNRIPE_COLOR:
-                print("Fruit is unripe, skipping.")
+                print("Fruit is unripe (green), skipping.")
                 continue
 
+            print("Harvesting fruit...")
             self.gripper.close()
-            self.move_to_xy(*NEUTRAL_POSITION)
+            self.move_to_xyz(fruit_location[0], fruit_location[1], TRAVEL_HEIGHT) # Lift it up
 
             if color == RIPE_COLOR:
-                print("Fruit is ripe, moving to fruit pit.")
-                self.move_to_xy(*FRUIT_PIT_LOCATION)
+                print("Fruit is ripe (red), moving to fruit pit.")
+                self.move_to_xyz(*FRUIT_PIT_LOCATION)
             elif color == ROTTEN_COLOR:
-                print("Fruit is rotten, moving to waste pit.")
-                self.move_to_xy(*WASTE_PIT_LOCATION)
+                print("Fruit is diseased (black), moving to waste pit.")
+                self.move_to_xyz(*WASTE_PIT_LOCATION)
 
             self.gripper.open()
 
-        self.move_to_xy(*NEUTRAL_POSITION)
-        print("--- Harvesting Complete ---")
+        self.move_to_xyz(*NEUTRAL_POSITION)
+        print("\n--- Harvesting Mission Complete ---")
