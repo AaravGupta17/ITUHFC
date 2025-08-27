@@ -27,23 +27,15 @@ import time
 
 from src.logic.robot import Robot
 from src.hardware.serial_hardware import SerialStepper, SerialGripper
-# Note: The ColorSensor is not included in this physical setup yet.
-# We would need a real implementation for it, e.g., SerialColorSensor.
-# For now, we will use the MockColorSensor to simulate its input.
+from src.navigation.mock_nav import MockBase
 from src.hardware.mock_hardware import MockColorSensor, RIPE_COLOR, UNRIPE_COLOR, ROTTEN_COLOR
 
 # --- Configuration ---
-# Update this to your Arduino's serial port
-SERIAL_PORT = '/dev/ttyACM0'  # Example for Linux. On Windows, it might be 'COM3'
+SERIAL_PORT = '/dev/ttyACM0'
 BAUD_RATE = 9600
-
-# Robot arm dimensions (in meters)
-UPPER_ARM_LENGTH = 1.0
-FOREARM_LENGTH = 1.0
-
-# Mission parameters
-# The two plots that are active for this match
-ACTIVE_PLOTS = ['orange', 'green']
+UPPER_ARM_LENGTH = 0.5
+FOREARM_LENGTH = 0.5
+ACTIVE_PLOTS = ['orange']
 
 def main():
     """
@@ -51,31 +43,29 @@ def main():
     """
     print("--- Python Robot Controller ---")
 
-    try:
-        # Initialize serial connection
-        print(f"Connecting to Arduino on {SERIAL_PORT} at {BAUD_RATE} baud...")
-        ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
-        # Wait for the Arduino to reset
-        time.sleep(2)
-        print("Connection successful.")
-    except serial.SerialException as e:
-        print(f"Error: Could not open serial port {SERIAL_PORT}.")
-        print(f"Please check that the Arduino is connected and the port is correct.")
-        print(e)
-        return
+    # In a real scenario, you would connect to the Arduino.
+    # For this simulation, we will comment out the serial connection
+    # and use the MockBase to simulate driving.
+    # try:
+    #     ser = serial.Serial(SERIAL_PORT, BAUD_RATE, timeout=1)
+    #     time.sleep(2)
+    # except serial.SerialException as e:
+    #     print(f"Error: Could not open serial port {SERIAL_PORT}.")
+    #     return
+    ser = None # Placeholder for the serial object
 
-    # Initialize hardware interfaces with the serial connection
-    base_stepper = SerialStepper(ser, 'B')
-    shoulder_stepper = SerialStepper(ser, 'S')
-    elbow_stepper = SerialStepper(ser, 'E')
-    gripper = SerialGripper(ser, 'G')
-
-    # We don't have a physical color sensor connected via serial yet,
-    # so we'll use the mock one to provide simulated data for the logic.
+    # Initialize all robot components
+    # Using mocks for everything to run a full simulation without hardware.
+    mobile_base = MockBase()
+    base_stepper = MockStepper(200) # Using Mock Stepper for simulation
+    shoulder_stepper = MockStepper(200)
+    elbow_stepper = MockStepper(200)
+    gripper = MockGripper() # Using Mock Gripper for simulation
     color_sensor = MockColorSensor()
 
     # Create a robot instance
     robot = Robot(
+        mobile_base=mobile_base,
         base_stepper=base_stepper,
         shoulder_stepper=shoulder_stepper,
         elbow_stepper=elbow_stepper,
@@ -87,41 +77,15 @@ def main():
     )
 
     # --- Run the robot's program ---
-    # The robot will now send commands to the Arduino
+    # Configure the mock sensor for the harvest mission
+    color_sensor.read_color = lambda: RIPE_COLOR
 
-    # Initialize to home positions
-    robot.initialize()
+    # Run the full, integrated mission
+    robot.full_mission()
 
-    # Run the sowing mission
-    robot.sow()
-
-    # Run the harvesting mission
-    # For demonstration, we'll configure the mock sensor to return a sequence of colors
-    color_sensor._color_sequence = [
-        RIPE_COLOR, ROTTEN_COLOR,
-        UNRIPE_COLOR, RIPE_COLOR,
-        UNRIPE_COLOR, ROTTEN_COLOR
-    ]
-    # We also need to modify the mock sensor to use this sequence
-    def read_color_from_sequence(self):
-        if hasattr(self, '_color_sequence') and self._color_sequence:
-            color = self._color_sequence.pop(0)
-            print(f"Simulated color sensor reading: {color}")
-            return color
-        return (0,0,0) # Default
-
-    MockColorSensor.read_color = read_color_from_sequence
-    MockColorSensor._color_sequence = [
-        RIPE_COLOR, ROTTEN_COLOR,
-        UNRIPE_COLOR, RIPE_COLOR,
-        UNRIPE_COLOR, ROTTEN_COLOR
-    ]
-
-    robot.harvest()
-
-    print("\n--- All missions complete ---")
-    ser.close()
-    print("Serial port closed.")
+    print("\n--- Simulation Complete ---")
+    # if ser:
+    #     ser.close()
 
 
 if __name__ == "__main__":

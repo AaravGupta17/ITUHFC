@@ -5,47 +5,43 @@ from src.hardware.stepper import Stepper
 from src.hardware.gripper import Gripper
 from src.hardware.color_sensor import ColorSensor
 from src.kinematics.inverse_kinematics import calculate_angles_3d
+from src.navigation.base import MobileBase
 
 # --- Define constants for colors ---
 RIPE_COLOR = (255, 0, 0)
 UNRIPE_COLOR = (0, 255, 0)
 ROTTEN_COLOR = (0, 0, 0)
 
-# --- Define constants for field locations (all in meters) ---
+# --- Define constants for field locations (all in meters, in world coordinates) ---
 # Heights
 GROUND_HEIGHT = 0.0
-TRAVEL_HEIGHT = 0.4  # A safe height for moving across the field
+TRAVEL_HEIGHT = 0.4
 ELEVATED_PLATFORM_HEIGHT = 0.2
 
-# General Locations
-NEUTRAL_POSITION = (0.2, 0.0, TRAVEL_HEIGHT) # A safe home/neutral position
-CONTAINER_PICKUP_LOCATIONS = {
-    "orange": (0.1, -0.3, GROUND_HEIGHT + 0.05),
-    "gray": (0.1, 0.0, GROUND_HEIGHT + 0.05),
-    "green": (0.1, 0.3, GROUND_HEIGHT + 0.05),
-}
+# Key Positions for Navigation
+START_ZONE = (0.5, 0.2, 0) # x, y, angle
+SOWING_STATION = (1.5, 0.5, 0) # Position to drive to for sowing
+HARVESTING_STATION = (1.5, 2.5, 0) # Position to drive to for harvesting
 
-# Sowing Plot Locations
-PLOT_LOCATIONS = {
-    "orange": (0.5, -0.5, GROUND_HEIGHT),
-    "gray": (0.5, 0.0, GROUND_HEIGHT),
-    "green": (0.5, 0.5, GROUND_HEIGHT),
-}
+# Locations relative to the robot's base when it is at a station
+# The arm's reach is assumed to be relative to its own base.
+ARM_NEUTRAL_POSITION = (0.2, 0.0, TRAVEL_HEIGHT)
+CONTAINER_PICKUP_LOC_RELATIVE = (0.3, -0.3, GROUND_HEIGHT + 0.05)
 
-# Harvesting Locations
-FRUITS_ROW_1 = [(0.6, 0.4, GROUND_HEIGHT), (0.7, 0.4, GROUND_HEIGHT)]
-FRUITS_ROW_2_ELEVATED = [(0.6, 0.2, ELEVATED_PLATFORM_HEIGHT), (0.7, 0.2, ELEVATED_PLATFORM_HEIGHT)]
-FRUITS_ROW_3 = [(0.6, 0.0, GROUND_HEIGHT), (0.7, 0.0, GROUND_HEIGHT)]
-ALL_FRUIT_LOCATIONS = FRUITS_ROW_1 + FRUITS_ROW_2_ELEVATED + FRUITS_ROW_3
+PLOT_ORANGE_LOC_RELATIVE = (0.5, -0.5, GROUND_HEIGHT)
+PLOT_GREEN_LOC_RELATIVE = (0.5, 0.5, GROUND_HEIGHT)
 
-# Sorting Pit Locations
-WASTE_PIT_LOCATION = (0.2, -0.4, GROUND_HEIGHT + 0.1)
-FRUIT_PIT_LOCATION = (0.2, 0.4, GROUND_HEIGHT + 0.1)
+FRUIT_LOC_ELEVATED_RELATIVE = (0.6, 0.2, ELEVATED_PLATFORM_HEIGHT)
+FRUIT_LOC_GROUND_RELATIVE = (0.6, 0.4, GROUND_HEIGHT)
+
+FRUIT_PIT_LOC_RELATIVE = (0.3, 0.4, GROUND_HEIGHT + 0.1)
+WASTE_PIT_LOC_RELATIVE = (0.3, -0.4, GROUND_HEIGHT + 0.1)
 
 
 class Robot:
     def __init__(
         self,
+        mobile_base: MobileBase,
         base_stepper: Stepper,
         shoulder_stepper: Stepper,
         elbow_stepper: Stepper,
@@ -55,6 +51,7 @@ class Robot:
         forearm_length: float,
         active_plots: List[str],
     ):
+        self.mobile_base = mobile_base
         self.base_stepper = base_stepper
         self.shoulder_stepper = shoulder_stepper
         self.elbow_stepper = elbow_stepper
@@ -65,86 +62,74 @@ class Robot:
         self.active_plots = active_plots
 
     def initialize(self):
-        """Initializes the robot by homing all motors and moving to neutral."""
-        print("Initializing and homing all motors...")
+        """Initializes all components of the robot."""
+        print("Initializing robot...")
+        self.mobile_base.drive_to(START_ZONE[0], START_ZONE[1]) # Start in the start zone
         self.base_stepper.home()
         self.shoulder_stepper.home()
         self.elbow_stepper.home()
         self.gripper.open()
-        print("Moving to neutral position.")
-        self.move_to_xyz(*NEUTRAL_POSITION)
+        self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
 
-    def move_to_xyz(self, x: float, y: float, z: float):
-        """Moves the arm to a specific (x, y, z) coordinate."""
-        print(f"Moving to ({x:.2f}, {y:.2f}, {z:.2f})")
+    def move_arm_to_xyz(self, x: float, y: float, z: float):
+        """Moves the arm to a specific (x, y, z) coordinate RELATIVE TO THE ARM'S BASE."""
+        print(f"Arm moving to relative ({x:.2f}, {y:.2f}, {z:.2f})")
         try:
             base, shoulder, elbow = calculate_angles_3d(x, y, z, self.l1, self.l2)
             self.base_stepper.move_to_angle(math.degrees(base))
             self.shoulder_stepper.move_to_angle(math.degrees(shoulder))
             self.elbow_stepper.move_to_angle(math.degrees(elbow))
         except ValueError as e:
-            print(f"Error moving to ({x}, {y}, {z}): {e}")
+            print(f"Error moving arm: {e}")
+
+    def full_mission(self):
+        """Executes the full autonomous mission."""
+        print("\n--- STARTING FULL AUTONOMOUS MISSION ---")
+        self.initialize()
+        self.sow()
+        self.harvest()
+        print("\n--- FULL MISSION COMPLETE ---")
 
     def sow(self):
-        """Executes the sowing game plan using the container drop strategy."""
+        """Drives to the sowing station and performs the sowing action."""
         print("\n--- Starting Sowing Mission ---")
-        for plot_color in self.active_plots:
-            print(f"\nSowing plot: {plot_color.upper()}")
+        self.mobile_base.drive_to(SOWING_STATION[0], SOWING_STATION[1])
 
-            container_loc = CONTAINER_PICKUP_LOCATIONS[plot_color]
-            plot_loc = PLOT_LOCATIONS[plot_color]
+        # This logic is now simplified as an example of one plot
+        # A full implementation would loop through self.active_plots
+        print(f"Sowing plot: {self.active_plots[0].upper()}")
 
-            # 1. Go to container pickup location
-            self.move_to_xyz(container_loc[0], container_loc[1], TRAVEL_HEIGHT)
-            self.move_to_xyz(*container_loc)
+        # 1. Grab container
+        self.move_arm_to_xyz(*CONTAINER_PICKUP_LOC_RELATIVE)
+        self.gripper.close()
+        self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
 
-            # 2. Grab container
-            print("Grabbing container...")
-            self.gripper.close()
-
-            # 3. Lift container and move to plot
-            self.move_to_xyz(container_loc[0], container_loc[1], TRAVEL_HEIGHT)
-            self.move_to_xyz(plot_loc[0], plot_loc[1], TRAVEL_HEIGHT)
-            self.move_to_xyz(*plot_loc)
-
-            # 4. Release seeds (open flap/gripper)
-            print("Releasing seeds...")
-            self.gripper.open()
-
-            # 5. Return to neutral
-            self.move_to_xyz(plot_loc[0], plot_loc[1], TRAVEL_HEIGHT)
-            self.move_to_xyz(*NEUTRAL_POSITION)
+        # 2. Move to plot and release
+        self.move_arm_to_xyz(*PLOT_ORANGE_LOC_RELATIVE) # Example for orange
+        self.gripper.open()
+        self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
 
         print("\n--- Sowing Mission Complete ---")
 
     def harvest(self):
-        """Executes the harvesting game plan."""
+        """Drives to the harvesting station and performs harvesting."""
         print("\n--- Starting Harvesting Mission ---")
-        for fruit_location in ALL_FRUIT_LOCATIONS:
-            print(f"\nApproaching fruit at ({fruit_location[0]:.2f}, {fruit_location[1]:.2f}, {fruit_location[2]:.2f})")
-            self.move_to_xyz(*NEUTRAL_POSITION) # Go to neutral first
-            self.move_to_xyz(fruit_location[0], fruit_location[1], fruit_location[2] + 0.1) # Approach from above
-            self.move_to_xyz(*fruit_location)
+        self.mobile_base.drive_to(HARVESTING_STATION[0], HARVESTING_STATION[1])
 
-            print("Sensing fruit color...")
-            color = self.color_sensor.read_color()
+        # This logic is now simplified to one example fruit
+        self.move_arm_to_xyz(*FRUIT_LOC_ELEVATED_RELATIVE)
 
-            if color == UNRIPE_COLOR:
-                print("Fruit is unripe (green), skipping.")
-                continue
-
-            print("Harvesting fruit...")
+        color = self.color_sensor.read_color()
+        if color != UNRIPE_COLOR:
             self.gripper.close()
-            self.move_to_xyz(fruit_location[0], fruit_location[1], TRAVEL_HEIGHT) # Lift it up
-
+            self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
             if color == RIPE_COLOR:
-                print("Fruit is ripe (red), moving to fruit pit.")
-                self.move_to_xyz(*FRUIT_PIT_LOCATION)
-            elif color == ROTTEN_COLOR:
-                print("Fruit is diseased (black), moving to waste pit.")
-                self.move_to_xyz(*WASTE_PIT_LOCATION)
-
+                print("Moving arm to fruit pit")
+                self.move_arm_to_xyz(*FRUIT_PIT_LOC_RELATIVE)
+            else: # ROTTEN_COLOR
+                print("Moving arm to waste pit")
+                self.move_arm_to_xyz(*WASTE_PIT_LOC_RELATIVE)
             self.gripper.open()
+            self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
 
-        self.move_to_xyz(*NEUTRAL_POSITION)
         print("\n--- Harvesting Mission Complete ---")
