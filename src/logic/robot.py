@@ -53,7 +53,6 @@ class Robot:
         color_sensor: ColorSensor,
         upper_arm_length: float,
         forearm_length: float,
-        active_plots: List[str],
     ):
         self.base_stepper = base_stepper
         self.shoulder_stepper = shoulder_stepper
@@ -62,7 +61,6 @@ class Robot:
         self.color_sensor = color_sensor
         self.l1 = upper_arm_length
         self.l2 = forearm_length
-        self.active_plots = active_plots
 
     def initialize(self):
         """Initializes all components of the robot."""
@@ -72,85 +70,95 @@ class Robot:
         self.elbow_stepper.home()
         self.gripper.open()
         self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
+        return True # Assume initialization is always successful for now
 
-    def move_arm_to_xyz(self, x: float, y: float, z: float):
-        """Moves the arm to a specific (x, y, z) coordinate in the world frame."""
+    def move_arm_to_xyz(self, x: float, y: float, z: float) -> bool:
+        """
+        Moves the arm to a specific (x, y, z) coordinate in the world frame.
+        Returns True on success, False on failure.
+        """
         print(f"Arm moving to world ({x:.2f}, {y:.2f}, {z:.2f})")
         try:
             base, shoulder, elbow = calculate_angles_3d(x, y, z, self.l1, self.l2)
+            # In a real robot, these would return success/fail statuses
             self.base_stepper.move_to_angle(math.degrees(base))
             self.shoulder_stepper.move_to_angle(math.degrees(shoulder))
             self.elbow_stepper.move_to_angle(math.degrees(elbow))
+            return True
         except ValueError as e:
             print(f"Error moving arm: {e}")
+            return False
 
-    def full_mission(self):
-        """Executes the full autonomous mission."""
-        print("\n--- STARTING FULL AUTONOMOUS MISSION ---")
-        self.initialize()
-        self.sow()
-        self.irrigate()
-        self.harvest()
-        print("\n--- FULL MISSION COMPLETE ---")
+    def execute_task(self, task: Dict) -> bool:
+        """
+        Executes a single task dictionary.
+        Returns True on success, False on failure.
+        """
+        task_type = task.get("type")
+        print(f"\n--- Executing Task: {task.get('name')} ---")
 
-    def sow(self):
-        """Performs the sowing action for all active plots."""
-        print("\n--- Starting Sowing Mission ---")
-        for plot_name in self.active_plots:
-            print(f"Sowing plot: {plot_name.upper()}")
-            plot_location = PLOT_LOCATIONS.get(plot_name)
-            if not plot_location:
-                print(f"Warning: No location defined for plot '{plot_name}'. Skipping.")
-                continue
+        if task_type == "sow":
+            return self._execute_sow_task(task)
+        elif task_type == "harvest":
+            return self._execute_harvest_task(task)
+        elif task_type == "irrigate":
+            return self._execute_irrigate_task(task)
+        else:
+            print(f"Unknown task type: {task_type}")
+            return False
 
-            # 1. Grab container
-            self.move_arm_to_xyz(*CONTAINER_PICKUP_LOC)
-            self.gripper.close()
-            self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
+    def _execute_sow_task(self, task: Dict) -> bool:
+        """Executes the sequence for a single sowing task."""
+        plot_location = task.get("location")
+        if not plot_location:
+            print("Error: Sow task requires a 'location'.")
+            return False
 
-            # 2. Move to plot and release
-            self.move_arm_to_xyz(*plot_location)
-            self.gripper.open()
-            self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
+        # 1. Grab container
+        if not self.move_arm_to_xyz(*CONTAINER_PICKUP_LOC): return False
+        if not self.gripper.close(): return False
+        if not self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION): return False
 
-        print("\n--- Sowing Mission Complete ---")
+        # 2. Move to plot and release
+        if not self.move_arm_to_xyz(*plot_location): return False
+        if not self.gripper.open(): return False
+        if not self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION): return False
 
-    def harvest(self):
-        """Performs harvesting and sorting for all predefined fruit locations."""
-        print("\n--- Starting Harvesting Mission ---")
-        for fruit_loc in HARVEST_LOCATIONS:
-            print(f"Checking for fruit at {fruit_loc}")
-            self.move_arm_to_xyz(*fruit_loc)
+        return True
 
-            color = self.color_sensor.read_color()
-            if color == UNRIPE_COLOR:
-                print("Fruit is unripe. Leaving it.")
-                continue
+    def _execute_harvest_task(self, task: Dict) -> bool:
+        """Executes the sequence for a single harvesting task."""
+        fruit_loc = task.get("location")
+        if not fruit_loc:
+            print("Error: Harvest task requires a 'location'.")
+            return False
 
-            print("Fruit is ripe or rotten. Harvesting.")
-            self.gripper.close()
-            self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
+        if not self.move_arm_to_xyz(*fruit_loc): return False
 
-            if color == RIPE_COLOR:
-                print("Moving arm to fruit pit")
-                self.move_arm_to_xyz(*FRUIT_PIT_LOC)
-            else: # ROTTEN_COLOR or other
-                print("Moving arm to waste pit")
-                self.move_arm_to_xyz(*WASTE_PIT_LOC)
+        color = self.color_sensor.read_color()
+        if color == UNRIPE_COLOR:
+            print("Fruit is unripe. Leaving it. Task considered successful.")
+            return True # Not a failure, just nothing to do
 
-            self.gripper.open()
-            self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
+        print("Fruit is ripe or rotten. Harvesting.")
+        if not self.gripper.close(): return False
+        if not self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION): return False
 
-        print("\n--- Harvesting Mission Complete ---")
+        drop_loc = FRUIT_PIT_LOC if color == RIPE_COLOR else WASTE_PIT_LOC
+        print(f"Moving arm to {'fruit pit' if color == RIPE_COLOR else 'waste pit'}")
+        if not self.move_arm_to_xyz(*drop_loc): return False
 
-    def irrigate(self):
-        """Moves the arm to operate the water lever."""
-        print("\n--- Starting Irrigation Mission ---")
+        if not self.gripper.open(): return False
+        if not self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION): return False
+        return True
+
+    def _execute_irrigate_task(self, task: Dict) -> bool:
+        """Executes the sequence for an irrigation task."""
         print("Moving to water lever...")
-        self.move_arm_to_xyz(*WATER_LEVER_START_LOC)
-        self.gripper.close()
+        if not self.move_arm_to_xyz(*WATER_LEVER_START_LOC): return False
+        if not self.gripper.close(): return False
         print("Pulling water lever...")
-        self.move_arm_to_xyz(*WATER_LEVER_END_LOC)
-        self.gripper.open()
-        self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION)
-        print("\n--- Irrigation Mission Complete ---")
+        if not self.move_arm_to_xyz(*WATER_LEVER_END_LOC): return False
+        if not self.gripper.open(): return False
+        if not self.move_arm_to_xyz(*ARM_NEUTRAL_POSITION): return False
+        return True
