@@ -1,31 +1,4 @@
 # ==============================================================================
-# HOW THIS SYSTEM PERFORMS THE MISSION
-# ==============================================================================
-# This Python script acts as the "brain" of the robot. It contains all the
-# high-level logic and strategy for the mission.
-#
-# 1. The `Robot` class (from `src/logic/robot.py`) defines the sequence of
-#    actions for the "sow" and "harvest" missions based on the mission rules.
-#
-# 2. The kinematics module (`src/kinematics/`) calculates the 3D path and
-#    joint angles needed for each movement.
-#
-# 3. This script sends very simple commands (e.g., "B,90.5") over the USB
-#    serial port to the Arduino.
-#
-# 4. The Arduino acts as the "muscle", receiving these simple commands and
-#    translating them into the low-level electrical signals to move the motors.
-#
-# The speed of the mission is NOT limited by this Python script; it is
-# limited by how fast the physical motors can move. See the comments in the
-# `robot_arm_controller.ino` file for how to tune the motor speed using the
-# AccelStepper library to meet the 2-minute time limit.
-# ==============================================================================
-
-import serial
-import time
-
-# ==============================================================================
 # This Python script acts as the "brain" of the robot. It contains the
 # competition timer, the strategy engine, and the main scheduler loop.
 # ==============================================================================
@@ -34,8 +7,12 @@ import time
 from typing import List, Dict, Optional
 from unittest.mock import MagicMock
 
+# In a real deployment, you would not mock the hardware.
+# You would replace the mock imports with the serial hardware imports.
+# import serial
+# from src.hardware.serial_hardware import SerialStepper, SerialGripper
+
 from src.logic.robot import Robot, PLOT_LOCATIONS, HARVEST_LOCATIONS, RIPE_COLOR, UNRIPE_COLOR
-from src.hardware.serial_hardware import SerialStepper, SerialGripper
 from src.hardware.mock_hardware import MockStepper, MockGripper, MockColorSensor
 
 # --- Configuration ---
